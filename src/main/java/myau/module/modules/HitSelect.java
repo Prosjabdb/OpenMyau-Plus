@@ -9,7 +9,9 @@ import myau.events.UpdateEvent;
 import myau.module.Module;
 import myau.property.properties.ModeProperty;
 import myau.property.properties.BooleanProperty;
-import myau.property.properties.NumberProperty;
+// FIX: Changed NumberProperty to DoubleProperty (assuming standard naming)
+import myau.property.properties.DoubleProperty;
+import myau.property.properties.IntegerProperty;
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLivingBase;
@@ -30,7 +32,6 @@ import java.util.ArrayDeque;
 
 public class HitSelect extends Module {
     private static final Minecraft mc = Minecraft.getMinecraft();
-    // FIX: Use instance Random instead of ThreadLocalRandom for consistency
     private static final Random RANDOM = new Random();
 
     // Universal bypass modes
@@ -38,8 +39,10 @@ public class HitSelect extends Module {
     public final ModeProperty acTarget = new ModeProperty("AC_Target", 0, new String[]{"AUTO", "GRIM", "VULCAN", "VERUS", "AAC", "POLAR", "NCP"});
     public final BooleanProperty humanization = new BooleanProperty("Humanization", true);
     public final BooleanProperty rotationCheck = new BooleanProperty("RotationCheck", true);
-    public final NumberProperty randomization = new NumberProperty("Randomization", 0.15, 0.0, 0.3, 0.01);
-    public final NumberProperty maxCps = new NumberProperty("MaxCPS", 12, 8, 20, 1);
+    // FIX: NumberProperty -> DoubleProperty for decimal values
+    public final DoubleProperty randomization = new DoubleProperty("Randomization", 0.15, 0.0, 0.3, 0.01);
+    // FIX: NumberProperty -> IntegerProperty for whole numbers
+    public final IntegerProperty maxCps = new IntegerProperty("MaxCPS", 12, 8, 20, 1);
 
     // State tracking
     private boolean sprintState = false;
@@ -55,11 +58,11 @@ public class HitSelect extends Module {
     private double randomizationFactor;
     private int maxConsecutiveBlocks;
     
-    // Transaction tracking (Grim/Polar) - FIX: Added missing field
+    // Transaction tracking (Grim/Polar)
     private int transactionId = 0;
     private long lastTransactionTime = 0;
     private int transactionCounter = 0;
-    private boolean awaitingTransaction = false; // FIX: Declared missing field
+    private boolean awaitingTransaction = false;
     
     // Pattern breaking (AAC/Vulcan)
     private int consecutiveBlocks = 0;
@@ -83,16 +86,16 @@ public class HitSelect extends Module {
     private int ghostPattern = 0;
     private long lastGhostSwitch = 0;
     
-    // NEW: Motion preservation system (backward compatible)
+    // Motion preservation system
     private double preservedMotionX = 0;
     private double preservedMotionZ = 0;
     private int motionPreserveTicks = 0;
     
-    // NEW: Velocity tracking for modern ACs (backward compatible)
+    // Velocity tracking for modern ACs
     private Deque<Double> velocityHistory = new ArrayDeque<>(10);
     private double lastVelocity = 0;
     
-    // NEW: CPS variance tracking (backward compatible)
+    // CPS variance tracking
     private long lastClickTime = 0;
     private double avgCps = 0;
 
@@ -117,7 +120,7 @@ public class HitSelect extends Module {
         if (event.getType() == EventType.PRE) {
             updateRotations();
             updateACDetection();
-            updateMotionPreservation(); // NEW: Maintains motion state
+            updateMotionPreservation();
         } else if (event.getType() == EventType.POST) {
             this.resetMotion();
             if (hitCounter++ % 40 == 0) {
@@ -130,7 +133,6 @@ public class HitSelect extends Module {
     private void updateRotations() {
         if (!rotationCheck.getValue() || mc.thePlayer == null) return;
         
-        // Smooth rotation updates to bypass AAC/Matrix rotation checks
         currentYaw = mc.thePlayer.rotationYaw;
         currentPitch = mc.thePlayer.rotationPitch;
         
@@ -138,11 +140,9 @@ public class HitSelect extends Module {
             float yawDiff = MathHelper.wrapAngleTo180_float(targetYaw - currentYaw);
             float pitchDiff = targetPitch - currentPitch;
             
-            // Gradual rotation (bypasses snap checks)
             float yawStep = yawDiff * 0.3f;
             float pitchStep = pitchDiff * 0.3f;
             
-            // Add micro-variation (bypasses constant rotation checks)
             yawStep += (RANDOM.nextFloat() - 0.5f) * 0.5f;
             pitchStep += (RANDOM.nextFloat() - 0.5f) * 0.5f;
             
@@ -153,21 +153,16 @@ public class HitSelect extends Module {
     }
     
     private void updateACDetection() {
-        // Auto-detect AC type based on server response patterns
-        if (acTarget.getValue() != 0) return; // Manual override
+        if (acTarget.getValue() != 0) return;
         
-        // Detect Grim by transaction patterns
         if (transactionCounter > 10 && System.currentTimeMillis() - lastTransactionTime < 100) {
-            // Likely Grim or Polar
-            randomizationFactor = 0.75; // Stricter randomization
+            randomizationFactor = 0.75;
         }
     }
     
-    // NEW: Motion preservation system (backward compatible addition)
     private void updateMotionPreservation() {
         if (motionPreserveTicks > 0) {
             motionPreserveTicks--;
-            // Gradual restoration instead of instant (bypasses "snap" detection)
             if (motionPreserveTicks == 0) {
                 mc.thePlayer.motionX = preservedMotionX;
                 mc.thePlayer.motionZ = preservedMotionZ;
@@ -184,8 +179,6 @@ public class HitSelect extends Module {
         this.dynamicDistanceThreshold = Math.max(2.0, Math.min(3.0, this.dynamicDistanceThreshold));
         
         this.randomizationFactor = 0.75 + (RANDOM.nextDouble() * 0.25);
-        
-        // Vary max consecutive blocks
         this.maxConsecutiveBlocks = 2 + RANDOM.nextInt(3);
     }
     
@@ -198,19 +191,16 @@ public class HitSelect extends Module {
     public void onPacket(PacketEvent event) {
         if (!this.isEnabled() || event.getType() != EventType.SEND || event.isCancelled()) return;
 
-        // Universal transaction handling (Grim/Polar/Vulcan)
         if (event.getPacket() instanceof C0FPacketConfirmTransaction) {
             handleTransaction((C0FPacketConfirmTransaction) event.getPacket());
             return;
         }
 
-        // Sprint state tracking (All ACs)
         if (event.getPacket() instanceof C0BPacketEntityAction) {
             handleEntityAction((C0BPacketEntityAction) event.getPacket());
             return;
         }
 
-        // Main attack logic
         if (event.getPacket() instanceof C02PacketUseEntity) {
             handleAttack((C02PacketUseEntity) event.getPacket(), event);
         }
@@ -221,8 +211,7 @@ public class HitSelect extends Module {
         this.transactionCounter++;
         this.awaitingTransaction = false;
         
-        // Grim/Vulcan: Don't block hits around transactions
-        if (acTarget.getValue() == 1 || acTarget.getValue() == 0) { // Grim or Auto
+        if (acTarget.getValue() == 1 || acTarget.getValue() == 0) {
             forceNextHit = true;
         }
     }
@@ -241,7 +230,6 @@ public class HitSelect extends Module {
     private void handleAttack(C02PacketUseEntity use, PacketEvent event) {
         if (use.getAction() != C02PacketUseEntity.Action.ATTACK) return;
 
-        // FIX: Added null check for mc.theWorld
         if (mc.theWorld == null) return;
         
         Entity target = use.getEntityFromWorld(mc.theWorld);
@@ -250,13 +238,11 @@ public class HitSelect extends Module {
 
         EntityLivingBase living = (EntityLivingBase) target;
         
-        // Universal CPS check (AAC/Vulcan/Matrix)
         if (!checkCPS()) {
             allowedHits++;
-            return; // Allow hit to maintain CPS
+            return;
         }
         
-        // Force allow after consecutive blocks (Universal)
         if (consecutiveBlocks >= maxConsecutiveBlocks || forceNextHit) {
             forceNextHit = false;
             consecutiveBlocks = 0;
@@ -267,7 +253,6 @@ public class HitSelect extends Module {
 
         boolean allow = determineHitAllow(living);
         
-        // Apply humanization randomization
         if (!allow && humanization.getValue() && RANDOM.nextDouble() < randomization.getValue()) {
             allow = true;
         }
@@ -277,10 +262,8 @@ public class HitSelect extends Module {
             blockedHits++;
             consecutiveBlocks++;
             
-            // Universal evasion: Vary motion fix method
             fixMotionUniversal();
             
-            // Occasional transaction sync (Polar/Grim)
             if (RANDOM.nextInt(6) == 0) {
                 sendTransactionPacket();
             }
@@ -289,7 +272,6 @@ public class HitSelect extends Module {
             consecutiveBlocks = 0;
             recordClick();
             
-            // Ghost mode pattern management
             if (mode.getValue() == 3) {
                 manageGhostMode();
             }
@@ -300,8 +282,9 @@ public class HitSelect extends Module {
         long now = System.currentTimeMillis();
         clickTimestamps.removeIf(time -> now - time > 1000);
         
-        if (clickTimestamps.size() >= maxCps.getValue()) {
-            return false; // Too many clicks, allow this one
+        // FIX: Use intValue() for IntegerProperty comparison
+        if (clickTimestamps.size() >= maxCps.getValue().intValue()) {
+            return false;
         }
         return true;
     }
@@ -310,24 +293,23 @@ public class HitSelect extends Module {
         long now = System.currentTimeMillis();
         clickTimestamps.add(now);
         
-        // NEW: Track CPS variance for humanization (backward compatible)
         if (lastClickTime > 0) {
             double interval = now - lastClickTime;
             double instantCps = 1000.0 / interval;
-            avgCps = (avgCps * 0.7) + (instantCps * 0.3); // Exponential moving average
+            avgCps = (avgCps * 0.7) + (instantCps * 0.3);
         }
         lastClickTime = now;
     }
     
     private boolean determineHitAllow(EntityLivingBase target) {
         switch (mode.getValue()) {
-            case 0: // SMART - Context aware
+            case 0:
                 return prioritizeSmart(mc.thePlayer, target);
-            case 1: // AGGRESSIVE - Prioritize damage
+            case 1:
                 return prioritizeAggressive(mc.thePlayer, target);
-            case 2: // DEFENSIVE - Prioritize safety
+            case 2:
                 return prioritizeDefensive(mc.thePlayer, target);
-            case 3: // GHOST - Human-like patterns
+            case 3:
                 return prioritizeGhost(mc.thePlayer, target);
             default:
                 return true;
@@ -335,32 +317,26 @@ public class HitSelect extends Module {
     }
     
     private boolean prioritizeSmart(EntityLivingBase player, EntityLivingBase target) {
-        // Dynamic decision based on health and situation
         double healthPercent = player.getHealth() / player.getMaxHealth();
         double targetHealthPercent = target.getHealth() / target.getMaxHealth();
         
-        // Low health = defensive, prioritize survival
         if (healthPercent < 0.3) {
             return prioritizeDefensive(player, target);
         }
         
-        // Target low health = aggressive finish
         if (targetHealthPercent < 0.3) {
             return prioritizeAggressive(player, target);
         }
         
-        // Default to second-hit logic with variation
         return prioritizeSecondHit(player, target);
     }
     
     private boolean prioritizeAggressive(EntityLivingBase player, EntityLivingBase target) {
-        // Allow more hits, block only obvious bad hits
         if (target.hurtTime != 0) return true;
         
         double dist = player.getDistanceToEntity(target);
         if (dist < dynamicDistanceThreshold * 1.2) return true;
         
-        // Block only if moving away and far
         if (!isMovingTowards(player, target, dynamicAngleThreshold * 0.8)) {
             return true;
         }
@@ -370,7 +346,6 @@ public class HitSelect extends Module {
     }
     
     private boolean prioritizeDefensive(EntityLivingBase player, EntityLivingBase target) {
-        // Conservative: Only hit when optimal
         if (target.hurtTime != 0) return true;
         
         if (player.hurtTime <= player.maxHurtTime - dynamicHurtBuffer) return true;
@@ -381,7 +356,6 @@ public class HitSelect extends Module {
         if (!isMovingTowards(target, player, dynamicAngleThreshold)) return true;
         if (!isMovingTowards(player, target, dynamicAngleThreshold)) return true;
         
-        // Additional check: Don't hit if player is swinging (AAC/Vulcan check)
         if (player.isSwingInProgress && RANDOM.nextInt(3) != 0) {
             return true;
         }
@@ -391,23 +365,19 @@ public class HitSelect extends Module {
     }
     
     private boolean prioritizeGhost(EntityLivingBase player, EntityLivingBase target) {
-        // Human-like decision making with patterns
         long now = System.currentTimeMillis();
         
-        // Switch patterns periodically
         if (now - lastGhostSwitch > 3000 + RANDOM.nextInt(2000)) {
             ghostPattern = 3 + RANDOM.nextInt(4);
             lastGhostSwitch = now;
             ghostHitsRemaining = ghostPattern;
         }
         
-        // Pattern-based allowing
         if (ghostHitsRemaining > 0) {
             ghostHitsRemaining--;
             return true;
         }
         
-        // Occasional "miss" or block
         if (RANDOM.nextInt(ghostPattern + 2) == 0) {
             ghostHitsRemaining = ghostPattern;
             fixMotionUniversal();
@@ -427,9 +397,8 @@ public class HitSelect extends Module {
         if (!isMovingTowards(target, player, dynamicAngleThreshold)) return true;
         if (!isMovingTowards(player, target, dynamicAngleThreshold)) return true;
         
-        // AAC/Vulcan: Check for rotation consistency
         if (rotationCheck.getValue() && !checkRotationLegitimacy(target)) {
-            return true; // Allow if rotation suspicious to avoid flag
+            return true;
         }
         
         fixMotionUniversal();
@@ -437,7 +406,6 @@ public class HitSelect extends Module {
     }
     
     private boolean checkRotationLegitimacy(EntityLivingBase target) {
-        // Calculate expected rotation to target
         double dx = target.posX - mc.thePlayer.posX;
         double dz = target.posZ - mc.thePlayer.posZ;
         double dy = (target.posY + target.getEyeHeight()) - (mc.thePlayer.posY + mc.thePlayer.getEyeHeight());
@@ -448,7 +416,6 @@ public class HitSelect extends Module {
         float yawDiff = Math.abs(MathHelper.wrapAngleTo180_float(expectedYaw - currentYaw));
         float pitchDiff = Math.abs(expectedPitch - currentPitch);
         
-        // If looking too perfectly, add variance (bypasses AAC heuristic)
         if (yawDiff < 2 && pitchDiff < 2) {
             targetYaw = currentYaw + (RANDOM.nextFloat() - 0.5f) * 4;
             targetPitch = currentPitch + (RANDOM.nextFloat() - 0.5f) * 2;
@@ -463,32 +430,29 @@ public class HitSelect extends Module {
         if (this.set) return;
 
         try {
-            // FIX: Proper motion preservation system
             this.preservedMotionX = mc.thePlayer.motionX;
             this.preservedMotionZ = mc.thePlayer.motionZ;
             
-            // Method 1: Direct motion manipulation (bypasses module-based detection)
             double preserveFactor = 0.55 + (RANDOM.nextDouble() * 0.25);
             
-            // Vary method based on AC target
             switch (acTarget.getValue()) {
-                case 1: // Grim - Use minimal motion change
+                case 1:
                     preserveFactor = 0.8 + (RANDOM.nextDouble() * 0.15);
                     break;
-                case 2: // Vulcan - Standard preservation
+                case 2:
                     preserveFactor = 0.6 + (RANDOM.nextDouble() * 0.2);
                     break;
-                case 3: // Verus - Aggressive preservation
+                case 3:
                     preserveFactor = 0.9;
                     break;
-                case 4: // AAC - Variable based on pattern
+                case 4:
                     preserveFactor = (blockedHits % 3 == 0) ? 0.7 : 0.85;
                     break;
             }
             
             mc.thePlayer.motionX *= preserveFactor;
             mc.thePlayer.motionZ *= preserveFactor;
-            this.motionPreserveTicks = 3; // NEW: Enable gradual restoration
+            this.motionPreserveTicks = 3;
             this.set = true;
             
         } catch (Exception e) {
@@ -498,17 +462,10 @@ public class HitSelect extends Module {
 
     private void resetMotion() {
         if (!this.set) return;
-
-        try {
-            // FIX: Motion is now handled by updateMotionPreservation() for gradual reset
-            this.set = false;
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        this.set = false;
     }
     
     private void manageGhostMode() {
-        // Vary ghost pattern to avoid detection
         if (RANDOM.nextInt(10) == 0) {
             ghostPattern = Math.max(2, ghostPattern + (RANDOM.nextBoolean() ? 1 : -1));
         }
@@ -546,7 +503,6 @@ public class HitSelect extends Module {
 
         double dotProduct = mx * tx + mz * tz;
         
-        // Add micro-variation to angle check (bypasses precise angle detection)
         double variation = Math.toRadians(RANDOM.nextDouble() * 3.0);
         return dotProduct >= Math.cos(Math.toRadians(maxAngle) + variation);
     }
@@ -564,15 +520,15 @@ public class HitSelect extends Module {
         this.forceNextHit = false;
         this.clickTimestamps.clear();
         this.rotationTicks = 0;
-        this.motionPreserveTicks = 0; // NEW: Reset motion preservation
-        this.velocityHistory.clear(); // NEW: Clear velocity history
+        this.motionPreserveTicks = 0;
+        if (this.velocityHistory != null) this.velocityHistory.clear();
     }
     
     @Override
     public void onEnabled() {
         initializeDynamicValues();
         this.clickTimestamps = new ArrayList<>();
-        this.velocityHistory = new ArrayDeque<>(); // NEW: Initialize velocity tracking
+        this.velocityHistory = new ArrayDeque<>();
         this.lastClickTime = 0;
         this.avgCps = 0;
     }
